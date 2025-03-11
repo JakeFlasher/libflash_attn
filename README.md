@@ -5,10 +5,10 @@ As a consquence, dropout is not supported (since the original code uses randomne
 git clone --recursive https://github.com/JakeFlasher/libflash_attn.git
 ```
 
-Build with
+Build with (make sure to check if cmake env variables of CUDA is correctly set!)
 ```
 mkdir build && cd build
-cmake ..
+cmake -D CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-12.0 ..
 make
 ```
 
