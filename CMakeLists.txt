@@ -1,3 +1,5 @@
+include(CMakePrintHelpers)
+
 cmake_minimum_required(VERSION 3.12)
 
 project(flash-attention LANGUAGES CXX CUDA)
@@ -37,7 +39,8 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr --use_fast_ma
 
 # ################ CUDA ################
 find_package(CUDAToolkit REQUIRED)
-
+cmake_print_variables(CUDAToolkit_INCLUDE_DIRS)
+cmake_print_variables(CUDA_TOOLKIT_ROOT_DIR)
 include_directories("./cutlass/include")
 include_directories("./include")
 include_directories(${CUDAToolkit_INCLUDE_DIRS})

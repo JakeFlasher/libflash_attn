@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <cassert>
-
+#include <iostream>
 #include "flash.h"
 #include "flash_internal.h"
 #ifdef HOPPER
@@ -31,7 +31,8 @@ void run(Flash_fwd_params params, cudaStream_t stream) {
   cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device);
   params.sm = major * 10 + minor;
   bool is_local = (params.window_size_left >= 0 || params.window_size_right >= 0) && !params.is_causal;
-
+  std::cout << params.sm << std::endl;
+#ifdef HOPPER
   if (params.sm >= 90 && (params.d == 64 || params.d == 128 || params.d == 256) && !is_local) {
     if (params.is_e4m3) {
       if (params.d == 64) {
@@ -51,6 +52,7 @@ void run(Flash_fwd_params params, cudaStream_t stream) {
       }
     }
   } else {
+#endif
     assert(params.is_e4m3 == false);
     auto head_dim = params.d;
     if (head_dim <= 32) {
@@ -69,9 +71,10 @@ void run(Flash_fwd_params params, cudaStream_t stream) {
       run_mha_fwd_<half, 224>(params, stream);
     } else {
       run_mha_fwd_<half, 256>(params, stream);
-    }
+    } 
+#ifdef HOPPER
   }
-
+#endif
 }
 
 Flash_fwd_params get_fwd_params(half* q_ptr, half* k_ptr, half* v_ptr, half* output_ptr,
