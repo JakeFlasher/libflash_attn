@@ -47,7 +47,6 @@ endif()
 find_package(CUDAToolkit REQUIRED)
 cmake_print_variables(CUDAToolkit_INCLUDE_DIRS)
 cmake_print_variables(CUDA_TOOLKIT_ROOT_DIR)
-find_package(gflags REQUIRED)
 
 # Set paths
 set(CUTLASS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cutlass)
@@ -60,8 +59,8 @@ include_directories(
     ${CUTLASS_DIR}/include
     ${CUDAToolkit_INCLUDE_DIRS}
     ${CUDA_TOOLKIT_ROOT_DIR}/include
-    ${GFLAGS_INCLUDE_DIR}
     ${SYS_CUDART_PATH}/include
+    ${CMAKE_CURRENT_SOURCE_DIR} # For argparse.hpp
 )
 
 # Link directories
@@ -70,6 +69,16 @@ link_directories(
     ${SYS_CUDA_DRIVER_PATH}
     ${SYS_CUDART_PATH}/lib64
 )
+
+# Download argparse if not present
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/argparse/argparse.hpp")
+    message(STATUS "Downloading argparse.hpp...")
+    file(DOWNLOAD
+         "https://raw.githubusercontent.com/p-ranav/argparse/master/include/argparse/argparse.hpp"
+         "${CMAKE_CURRENT_SOURCE_DIR}/argparse/argparse.hpp"
+         SHOW_PROGRESS
+    )
+endif()
 
 # Source files for the library
 set(COMMON_SRCS
@@ -110,5 +119,11 @@ add_library(flash_attn SHARED ${COMMON_SRCS})
 set_target_properties(flash_attn PROPERTIES CUDA_ARCHITECTURES "${compute_capability}")
 
 # Create the test executable
-add_executable(main src/main.cc)
-target_link_libraries(main flash_attn ${GFLAGS_LIBRARIES} ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES})
+add_executable(bench src/bench.cc)
+set_target_properties(bench PROPERTIES LINKER_LANGUAGE CUDA)
+target_link_libraries(bench
+    flash_attn
+    CUDA::cudart
+    CUDA::cublas
+    CUDA::cuda_driver
+)
