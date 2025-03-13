@@ -8,6 +8,19 @@
 #include "flash.h"
 #include "flash_fwd_kernel.h"
 #include "flash_internal.h"
+#include <cstdlib>  // for std::getenv
+#include <string>   // for std::stoi
+#include <algorithm> // for std::min, std::max
+                     
+inline int get_smem_carveout() {
+    const char* carveout_str = std::getenv("FLASH_ATTN_SMEM_CARVEOUT");
+    if (carveout_str) {
+        int value = std::stoi(carveout_str);
+        // Clamp to valid range 0-100
+        return std::min(100, std::max(0, value));
+    }
+    return 50; // default value if env variable is not set
+}
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K>
 __global__ void flash_fwd_kernel(__grid_constant__ const Flash_fwd_params params) {
@@ -50,12 +63,16 @@ void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                     // auto kernel = &flash_fwd_kernel<Kernel_traits, false, Is_causal, false, false, true, true, false>;
                     // auto kernel = &flash_fwd_kernel<Kernel_traits, false, Is_causal, false, true, true, false>;
                     if (smem_size >= 48 * 1024) {
-		      cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+		                   cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
                     }
                     // int ctas_per_sm;
                     // cudaError status_ = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
                     //     &ctas_per_sm, kernel, Kernel_traits::kNThreads, smem_size);
                     // printf("smem_size = %d, CTAs per SM = %d\n", int(smem_size), ctas_per_sm);
+                                        // Get carveout from environment variable
+                    int carveout = get_smem_carveout();
+                    cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, carveout);
+                    
                     kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
                 });
             });
