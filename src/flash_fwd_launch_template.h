@@ -22,6 +22,83 @@ inline int get_smem_carveout() {
     return 50; // default value if env variable is not set
 }
 
+/*------------------------------------------------------
+  L2 persisting cache implementation - improved version
+ ------------------------------------------------------*/
+
+ inline float get_l2_carveout_percent() {
+    const char* env_str = std::getenv("FLASH_ATTN_L2_CARVEOUT");
+    if (!env_str) return 50.f; // default
+    try {
+        float val = std::stof(env_str);
+        // clamp to [0..100]
+        return std::max(0.f, std::min(100.f, val));
+    } catch (...) {
+        fprintf(stderr, "[Warning] Could not parse FLASH_ATTN_L2_CARVEOUT; default to 50.\n");
+        return 50.f;
+    }
+}
+
+inline void set_l2_persisting_cache_by_percent() {
+    int dev_id;
+    cudaGetDevice(&dev_id);
+
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, dev_id);
+
+    size_t max_persist = prop.persistingL2CacheMaxSize; 
+    float carveout_percent = get_l2_carveout_percent();
+    size_t bytes_to_set = static_cast<size_t>(carveout_percent / 100.f * (float)max_persist);
+
+    cudaError_t err = cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, bytes_to_set);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "[Warning] set_l2_persisting_cache_by_percent(%.1f%% => %zu B) failed: %s\n",
+                carveout_percent, bytes_to_set, cudaGetErrorString(err));
+    } else {
+        fprintf(stderr, "[Info] L2 set-aside => %.2f%% => %zu / %zu bytes.\n",
+                carveout_percent, bytes_to_set, max_persist);
+    }
+}
+
+inline void set_stream_access_policy(cudaStream_t stream, Flash_fwd_params &params) {
+    // Choose the most frequently accessed pointer - typically q_ptr
+    void* base_ptr = const_cast<void*>(params.q_ptr);
+    if (!base_ptr) {
+        fprintf(stderr, "[Warning] q_ptr is null, skipping access policy window setup\n");
+        return;
+    }
+    
+    // Get device properties
+    int dev_id;
+    cudaGetDevice(&dev_id);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, dev_id);
+    
+    // Use the maximum allowed window size
+    size_t window_size = prop.accessPolicyMaxWindowSize;
+    
+    // Set the access policy window
+    cudaStreamAttrValue attr;
+    memset(&attr, 0, sizeof(attr));
+
+    attr.accessPolicyWindow.base_ptr  = base_ptr;
+    attr.accessPolicyWindow.num_bytes = window_size;
+    attr.accessPolicyWindow.hitRatio  = 1.0f;
+    attr.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
+    attr.accessPolicyWindow.missProp  = cudaAccessPropertyPersisting;
+
+    cudaError_t err = cudaStreamSetAttribute(stream,
+                                          cudaStreamAttributeAccessPolicyWindow,
+                                          &attr);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "[Warning] set_stream_access_policy(%p, %zu B) => %s\n",
+                base_ptr, window_size, cudaGetErrorString(err));
+    } else {
+        fprintf(stderr, "[Info] Marked region %p..%p as persisting. size=%zu\n",
+                base_ptr, (void*)((char*)base_ptr + window_size), window_size);
+    }
+}
+
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K>
 __global__ void flash_fwd_kernel(__grid_constant__ const Flash_fwd_params params) {
     static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
@@ -41,6 +118,11 @@ __global__ void flash_fwd_splitkv_combine_kernel(__grid_constant__ const Flash_f
 
 template<typename Kernel_traits, bool Is_causal>
 void run_flash_fwd(Flash_fwd_params &params, cudaStream_t stream) {
+    // Set L2 persisting cache as % of max
+    set_l2_persisting_cache_by_percent();
+
+    // Set access policy window for params.q_ptr 
+    set_stream_access_policy(stream, params);    
     constexpr size_t smem_size = Kernel_traits::kSmemSize;
     // printf("smem_size = %d\n", smem_size);
 
