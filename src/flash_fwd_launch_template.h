@@ -75,7 +75,7 @@ inline void set_stream_access_policy(cudaStream_t stream, Flash_fwd_params &para
     cudaGetDeviceProperties(&prop, dev_id);
     
     // Use the maximum allowed window size
-    size_t window_size = prop.accessPolicyMaxWindowSize;
+    size_t window_size = prop.accessPolicyMaxWindowSize - 1;
     
     // Set the access policy window
     cudaStreamAttrValue attr;
