@@ -26,7 +26,7 @@ inline int get_smem_carveout() {
   L2 persisting cache implementation - improved version
  ------------------------------------------------------*/
 
- inline float get_l2_carveout_percent() {
+inline float get_l2_carveout_percent() {
     const char* env_str = std::getenv("FLASH_ATTN_L2_CARVEOUT");
     if (!env_str) return 50.f; // default
     try {
@@ -74,18 +74,25 @@ inline void set_stream_access_policy(cudaStream_t stream, Flash_fwd_params &para
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, dev_id);
     
-    // Use the maximum allowed window size
-    size_t window_size = prop.accessPolicyMaxWindowSize - 1;
+    // Estimate tensor size - and limit to maximum allowed window size
+    // Use element size = 2 bytes for half/bf16/e4m3
+    const size_t element_size = 2;
+    size_t q_size = params.b * params.h * params.seqlen_q * params.d * element_size;
+    
+    // Clamp to maximum allowed window size (leave a small margin for safety)
+    size_t max_window_size = prop.accessPolicyMaxWindowSize;
+    if (max_window_size > 1024) max_window_size -= 1024; // Safety margin
+    size_t window_size = std::min(q_size, max_window_size);
     
     // Set the access policy window
-    cudaStreamAttrValue attr;
-    memset(&attr, 0, sizeof(attr));
+    cudaStreamAttrValue attr = {};
+    // memset(&attr, 0, sizeof(attr));
 
     attr.accessPolicyWindow.base_ptr  = base_ptr;
     attr.accessPolicyWindow.num_bytes = window_size;
     attr.accessPolicyWindow.hitRatio  = 1.0f;
     attr.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
-    attr.accessPolicyWindow.missProp  = cudaAccessPropertyPersisting;
+    attr.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
 
     cudaError_t err = cudaStreamSetAttribute(stream,
                                           cudaStreamAttributeAccessPolicyWindow,
@@ -98,6 +105,7 @@ inline void set_stream_access_policy(cudaStream_t stream, Flash_fwd_params &para
                 base_ptr, (void*)((char*)base_ptr + window_size), window_size);
     }
 }
+
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K>
 __global__ void flash_fwd_kernel(__grid_constant__ const Flash_fwd_params params) {
